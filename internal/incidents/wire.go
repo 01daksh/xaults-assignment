@@ -1,15 +1,15 @@
 //go:generate go run -mod=mod github.com/google/wire/cmd/wire
 //go:build wireinject
 
-package services
+package incidents
 
 import (
 	"github.com/google/wire"
 )
 
-func NewServiceWire() *ServiceController {
+func NewIncidentWire() *IncidentController {
 	wire.Build(
 		ControllerSet,
 	)
-	return &ServiceController{}
+	return &IncidentController{}
 }

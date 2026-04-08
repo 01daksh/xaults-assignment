@@ -1,0 +1,54 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+
+      - name: Run Linting
+        run: |
+          golangci-lint run ./...
+
+      - name: Run Unit Tests
+        run: |
+          go test -v -race ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub (Optional, if pushing to a private registry)
+        # Only uncomment and configure if you intend to push the image to Docker Hub or another registry
+        # uses: docker/login-action@v3
+        # with:
+        #   username: ${{ secrets.DOCKER_USERNAME }}
+        #   password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker Image
+        run: |
+          docker build -t xaults-assignment:latest .
+
+      - name: Verify Docker Image
+        run: |
+          docker images xaults-assignment
+
+      # - name: Push Docker Image (Optional)
+      #   # Only uncomment if you logged in above and want to push the image
+      #   run: |
+      #     docker push xaults-assignment:latest

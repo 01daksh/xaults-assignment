@@ -1,0 +1,28 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+docs/
+
+# Local env overrides — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# Go build cache / test artefacts
+tmp/
+vendor/
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
