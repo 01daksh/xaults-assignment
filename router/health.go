@@ -33,3 +33,4 @@ func NewHealthHandler(db *gorm.DB) echo.HandlerFunc {
 		return c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
 	}
 }
+
