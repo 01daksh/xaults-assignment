@@ -58,6 +58,15 @@ func Middleware() echo.MiddlewareFunc {
 		return func(c *echo.Context) error {
 			start := time.Now()
 			err := next(c)
+
+			// Echo may defer converting returned errors into an HTTP response
+			// until after middleware unwinds. Force the HTTP error handler
+			// to run now so metrics observe the final status code.
+			if err != nil {
+				c.Echo().HTTPErrorHandler(c,err)
+				err = nil
+			}
+
 			elapsed := time.Since(start).Seconds()
 
 			req := c.Request()
