@@ -4,12 +4,14 @@ IMAGE_NAME := xaults-assignment:latest
 NAMESPACE := xaults
 TERRAFORM_DIR := terraform
 
-.PHONY: help minikube-start wait-cluster build image-load tf-init deploy redeploy destroy status logs-api logs-db logs-prom logs-grafana port-forward-api port-forward-prometheus port-forward-grafana
+.PHONY: help minikube-start wait-cluster ingress-ready wait-apps build image-load tf-init deploy redeploy destroy status logs-api logs-db logs-prom logs-grafana port-forward-api port-forward-prometheus port-forward-grafana
 
 help:
 	@echo "Available targets:"
 	@echo "  make minikube-start       Start Minikube with the Docker driver"
 	@echo "  make wait-cluster         Wait for Minikube and the Kubernetes node to be ready"
+	@echo "  make ingress-ready        Enable and wait for the Minikube ingress addon"
+	@echo "  make wait-apps            Wait for the main deployments to become available"
 	@echo "  make build                Build the API Docker image"
 	@echo "  make image-load           Load the image into Minikube"
 	@echo "  make tf-init              Initialize Terraform"
@@ -31,6 +33,19 @@ minikube-start:
 wait-cluster:
 	kubectl wait --for=condition=Ready node/minikube --timeout=120s
 
+ingress-ready:
+	minikube addons enable ingress
+	kubectl wait -n ingress-nginx --for=condition=Available deployment/ingress-nginx-controller --timeout=180s
+	kubectl wait -n ingress-nginx --for=condition=Complete job/ingress-nginx-admission-create --timeout=180s
+	kubectl wait -n ingress-nginx --for=condition=Complete job/ingress-nginx-admission-patch --timeout=180s
+	kubectl wait -n ingress-nginx --for=jsonpath='{.subsets[0].addresses[0].ip}' endpoints/ingress-nginx-controller-admission --timeout=180s
+
+wait-apps:
+	kubectl wait -n $(NAMESPACE) --for=condition=Available deployment/xaults-postgres --timeout=180s
+	kubectl wait -n $(NAMESPACE) --for=condition=Available deployment/xaults-api --timeout=180s
+	kubectl wait -n $(NAMESPACE) --for=condition=Available deployment/prometheus --timeout=180s
+	kubectl wait -n $(NAMESPACE) --for=condition=Available deployment/grafana --timeout=180s
+
 build:
 	docker build -t $(IMAGE_NAME) .
 
@@ -40,8 +55,14 @@ image-load:
 tf-init:
 	terraform -chdir=$(TERRAFORM_DIR) init
 
-deploy: minikube-start wait-cluster build image-load tf-init
-	terraform -chdir=$(TERRAFORM_DIR) apply -auto-approve
+deploy: minikube-start wait-cluster ingress-ready build image-load tf-init
+	for attempt in 1 2 3; do \
+		terraform -chdir=$(TERRAFORM_DIR) apply -auto-approve && break; \
+		if [ $$attempt -eq 3 ]; then exit 1; fi; \
+		echo "terraform apply failed; waiting for cluster components to settle before retry $$((attempt + 1))..."; \
+		sleep 15; \
+	done
+	$(MAKE) wait-apps
 
 redeploy: build image-load
 	kubectl rollout restart deployment/xaults-api -n $(NAMESPACE)
@@ -66,10 +87,15 @@ logs-grafana:
 	kubectl logs -n $(NAMESPACE) deployment/grafana -f
 
 port-forward-api:
-	kubectl port-forward -n $(NAMESPACE) svc/xaults-api 1323:80
+	@echo "Starting API port-forward..."
+	kubectl port-forward -n $(NAMESPACE) svc/xaults-api 1323:80 > api.log 2>&1 &
 
 port-forward-prometheus:
-	kubectl port-forward -n $(NAMESPACE) svc/prometheus 9090:9090
+	@echo "Starting Prometheus port-forward..."
+	kubectl port-forward -n $(NAMESPACE) svc/prometheus 9090:9090 > prometheus.log 2>&1 &
 
 port-forward-grafana:
-	kubectl port-forward -n $(NAMESPACE) svc/grafana 3000:3000
+	@echo "Starting Grafana port-forward..."
+	kubectl port-forward -n $(NAMESPACE) svc/grafana 3000:3000 > grafana.log 2>&1 &
+
+port-forward-all: port-forward-api port-forward-prometheus port-forward-grafana

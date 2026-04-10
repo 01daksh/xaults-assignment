@@ -1,17 +1,67 @@
 # Xaults Assignment
 
-This project is a Go API backed by PostgreSQL and deployed locally with Minikube, Terraform, and Kubernetes.
+## 1. ♨️ Architectural Choices 
 
-The repository also includes a monitoring stack:
+This project is designed as a small service-health and incident-management API written in Go, with PostgreSQL as the primary datastore.
 
-- Prometheus for scraping `/metrics`
-- Grafana for dashboards
-- automatic Grafana provisioning for the Prometheus datasource and dashboard
-- a Grafana dashboard export for the application's Golden Signals
+The main architectural choices are:
 
-Terraform applies the Kubernetes resources defined in [k8s/manifests.yaml](/Users/daksh/GolandProjects/xaults-assignment/k8s/manifests.yaml#L1).
+- The API is built with Echo.
+- The codebase is split by domain, mainly `services` and `incidents`, so request handling, business logic, and persistence stay separated.
+- Dependency wiring is handled through Wire-generated constructors using `Google Wire`, which keeps controller/service/repository composition.
+- PostgreSQL(SQL) is used as the system of record because the domain is relational: incidents belong to services, service health depends on incident state, and consistency matters more than flexible schema designs like MongoDB.
+- GORM is used for persistence to speed up CRUD development and model migration in a small project.
+- The local deployment target is Kubernetes on Minikube, managed through Terraform, so the project can be reviewed with infrastructure-as-code.
 
-## Prerequisites
+The runtime also includes monitoring by default:
+
+- Prometheus access  metrics from `/metrics` endpoint.
+- Grafana is provisioned with a Prometheus datasource, along with the Golden Signals and some more metrices.
+
+
+## 2. Data Modeling Rationale And Connection Management Strategy
+
+### Data Modeling Rationale
+
+The data model is centered around two entities: `Services` & `Incident`
+
+The relation:
+
+- A service is the primary managed object in the system.
+- Incidents are attached to services.
+- A service can have many incidents.
+- A service's effective health can be derived from the current incident state.
+
+This relational model fits PostgreSQL well because:
+
+- querying incidents by service is common
+- the domain is operational data, not document-oriented data
+
+The project also emits business metrics from this model:
+
+- `active_services_total`
+- `open_incidents_total{severity=...}`
+
+Those are useful for understanding the application state alongside standard traffic/error/latency/saturation signals.
+
+### Connection Management Strategy
+
+Database connection setup lives in [internal/database/postgres.go](/Users/daksh/GolandProjects/xaults-assignment/internal/database/postgres.go), with configuration sourced from [config/config.go](/Users/daksh/GolandProjects/xaults-assignment/config/config.go).
+
+The current connection strategy is:
+
+- open one shared GORM-backed database handle during application startup
+- fail fast if the database cannot be reached
+- configure the underlying `sql.DB` pool using:
+  - `DB_MAX_OPEN_CONNS(default = 25)`
+  - `DB_MAX_IDLE_CONNS(default = 5)`
+  - `DB_CONN_MAX_LIFETIME(default = 5 mins)`
+- reuse that pool across requests rather than opening per-request connections, has used it very frequently in many projects
+
+
+## 3. 🪄 Project Startup
+
+### Prerequisites
 
 - Docker Desktop
 - Minikube
@@ -19,7 +69,7 @@ Terraform applies the Kubernetes resources defined in [k8s/manifests.yaml](/User
 - `terraform`
 - `make`
 
-## Quick Start
+### Quick Start
 
 Start Docker Desktop first, then run:
 
@@ -27,19 +77,17 @@ Start Docker Desktop first, then run:
 make deploy
 ```
 
-After deployment, open separate terminals for local access:
+After deployment, port forward for accessing the apis and analytics application through the host system:
 
 ```sh
-make port-forward-api
-make port-forward-prometheus
-make port-forward-grafana
+make port-forward-all
 ```
 
 Local URLs:
 
-- API: `http://127.0.0.1:1323`
-- Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000`
+- API: http://127.0.0.1:1323
+- Grafana: http://127.0.0.1:3000
+- Prometheus: http://127.0.0.1:9090
 
 Grafana default credentials:
 
@@ -48,30 +96,33 @@ Grafana default credentials:
 
 After Grafana starts, the Prometheus datasource and the `Xaults API Observability` dashboard are provisioned automatically.
 
-## What `make deploy` Does
+### What `make deploy` Does
 
 `make deploy` runs the local assignment flow end to end:
 
 1. builds the API Docker image as `xaults-assignment:latest`
 2. starts Minikube with the Docker driver
 3. waits for the Minikube node to become Ready
-4. loads the image into Minikube
-5. initializes Terraform in [terraform/](/Users/daksh/GolandProjects/xaults-assignment/terraform)
-6. applies the Kubernetes resources through Terraform with auto-approval
+4. enables the Minikube ingress addon and waits for its admission webhook to become ready
+5. loads the image into Minikube
+6. initializes Terraform in [terraform/](/Users/daksh/GolandProjects/xaults-assignment/terraform)
+7. applies the Kubernetes resources through Terraform with auto-approval, with retries for transient local-cluster races
+8. waits for the main deployments to become available before returning
 
-## Manual Terraform Flow
+### Manual Terraform Flow
 
 If you want to run the steps yourself:
 
 ```sh
 minikube start --driver=docker
+kubectl wait --for=condition=Ready node/minikube --timeout=120s
 docker build -t xaults-assignment:latest .
 minikube image load xaults-assignment:latest
 terraform -chdir=terraform init
 terraform -chdir=terraform apply
 ```
 
-## Verify The Deployment
+### Verify The Deployment
 
 Check pods and services:
 
@@ -86,7 +137,7 @@ You should see running workloads for:
 - `prometheus`
 - `grafana`
 
-## API Usage
+### API Usage
 
 Expose the API:
 
@@ -112,11 +163,9 @@ For Postman:
 GET http://127.0.0.1:1323/healthz
 ```
 
-## Monitoring Stack
+### Monitoring Stack
 
-### Prometheus Scrape Configuration
-
-The monitoring configuration is included in [k8s/manifests.yaml](/Users/daksh/GolandProjects/xaults-assignment/k8s/manifests.yaml#L196) through the `prometheus-config` `ConfigMap`.
+Prometheus scrape configuration is included in [k8s/manifests.yaml](/Users/daksh/GolandProjects/xaults-assignment/k8s/manifests.yaml#L236) through the `prometheus-config` `ConfigMap`.
 
 Prometheus scrapes:
 
@@ -124,11 +173,7 @@ Prometheus scrapes:
 - target: `xaults-api.xaults.svc.cluster.local:80`
 - interval: `5s`
 
-This covers the requirement to provide the configuration needed for the monitoring stack to scrape the application's metrics.
-
-### Access Prometheus
-
-Run:
+Access Prometheus:
 
 ```sh
 make port-forward-prometheus
@@ -140,9 +185,7 @@ Then open:
 http://127.0.0.1:9090
 ```
 
-### Access Grafana
-
-Run:
+Access Grafana:
 
 ```sh
 make port-forward-grafana
@@ -154,37 +197,17 @@ Then open:
 http://127.0.0.1:3000
 ```
 
-Login:
+The exported dashboard JSON is stored at [monitoring/xaults-api-observability-dashboard.json](/Users/daksh/GolandProjects/xaults-assignment/monitoring/xaults-api-observability-dashboard.json#L1).
 
-- username: `admin`
-- password: `admin`
-
-### Dashboard Provisioning
-
-Grafana is provisioned automatically from Kubernetes config in [k8s/manifests.yaml](/Users/daksh/GolandProjects/xaults-assignment/k8s/manifests.yaml#L254):
-
-- datasource: Prometheus
-- dashboard provider: `Xaults`
-- dashboard: `Xaults API Observability`
-
-The exported dashboard JSON is also stored in the repo at [monitoring/xaults-api-observability-dashboard.json](/Users/daksh/GolandProjects/xaults-assignment/monitoring/xaults-api-observability-dashboard.json#L1).
-
-It visualizes the Golden Signals using these panels:
+It includes:
 
 - Traffic: request rate
 - Errors: 5xx error rate and error percentage
 - Latency: p95 request latency
-- Saturation: process CPU usage and resident memory usage
+- Saturation: CPU usage and memory usage
 - Business context: active services and open incidents by severity
 
-Your original dashboard JSON was close, but I adjusted it because `active_services_total` and `open_incidents_total` are business metrics, not true saturation signals. The provisioned/exported version keeps those panels, but uses Go process metrics for saturation so it matches the Golden Signals more accurately for this API.
-
-This satisfies both:
-
-- monitoring stack scrape configuration
-- dashboard export for the Golden Signals
-
-## Useful Commands
+### Useful Commands
 
 Show logs:
 
@@ -201,7 +224,7 @@ Rebuild and restart the API after code changes:
 make redeploy
 ```
 
-## Tear Down
+### Tear Down
 
 Destroy the Terraform-managed infrastructure:
 
@@ -214,9 +237,3 @@ Stop Minikube if needed:
 ```sh
 minikube stop
 ```
-
-## Notes
-
-- The old Docker Compose workflow is no longer the primary local run path for this assignment.
-- PostgreSQL is configured with ephemeral storage for reliable local Minikube startup.
-- The root `Makefile` is intended to make review and demo setup faster.
