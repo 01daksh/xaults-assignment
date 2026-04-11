@@ -49,3 +49,7 @@ func GetDBConnection() (*gorm.DB, error) {
 	}
 	return db, nil
 }
+
+func SetDBConnection(conn *gorm.DB) {
+	db = conn
+}

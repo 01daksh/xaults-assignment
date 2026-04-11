@@ -63,11 +63,51 @@ The current connection strategy is:
 
 ### Prerequisites
 
+- Go (version >= 1.25.0)
 - Docker Desktop
 - Minikube
+--https://minikube.sigs.k8s.io/docs/start/
+
+(MacOS)
+```sh
+brew install minikube
+```
+
 - `kubectl`
+-- Install from: https://kubernetes.io/docs/tasks/tools/
+
+(MacOS)
+```sh
+brew install kubectl
+```
 - `terraform`
+-- Install from: https://developer.hashicorp.com/terraform/downloads
+
+(MacOS)
+```sh
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+```
 - `make`
+
+(MacOS)
+```sh
+brew install make
+```
+
+
+### Clone the Repository
+
+First, clone the project and move into the directory:
+
+```sh
+git clone https://github.com/01daksh/xaults-assignment.git
+cd xaults-assignment
+```
+
+```sh
+go mod tidy
+```
 
 ### Quick Start
 
@@ -86,7 +126,7 @@ make port-forward-all
 Local URLs:
 
 - API: http://127.0.0.1:1323
-- Grafana: http://127.0.0.1:3000
+- Grafana: http://127.0.0.1:3000 (username and password: `admin` for both)
 - Prometheus: http://127.0.0.1:9090
 
 Grafana default credentials:
@@ -139,13 +179,7 @@ You should see running workloads for:
 
 ### API Usage
 
-Expose the API:
-
-```sh
-make port-forward-api
-```
-
-Health endpoint:
+📡 Health endpoint:
 
 ```sh
 curl http://127.0.0.1:1323/healthz
@@ -157,11 +191,78 @@ Expected response:
 {"status":"healthy"}
 ```
 
-For Postman:
+API:
 
 ```text
 GET http://127.0.0.1:1323/healthz
 ```
+
+🛠️ Create a Service:
+
+```sh
+curl --location 'http://localhost:1323/services' \
+--header 'Content-Type: application/json' \
+--data '{
+  "name": "payment-services",
+  "description": "Handles payment"
+}'
+```
+
+API:
+
+```
+POST http://localhost:1323/services
+```
+
+Get All Services:
+
+```sh
+curl --location 'http://localhost:1323/services'
+```
+
+API:
+```
+GET http://localhost:1323/services
+```
+
+🚨Incident API:
+
+Create Incident
+```sh
+curl --location 'http://localhost:1323/services/5/incidents' \
+--header 'Content-Type: application/json' \
+--data '{
+  "title": "low Load",
+  "description": "lorem ipsum",
+  "severity": "low"
+}'
+```
+
+API:
+```
+POST http://localhost:1323/services/{service_id}/incidents
+```
+
+Body:
+```
+{
+  "title": "low Load",
+  "description": "lorem ipsum",
+  "severity": "low"
+}
+```
+
+Get All Incidents of a specific service:
+
+```sh
+curl --location 'http://localhost:1323/services/5/incidents'
+```
+
+API:
+```
+GET http://localhost:1323/services/{service_id}/incidents
+```
+
 
 ### Monitoring Stack
 
@@ -173,31 +274,7 @@ Prometheus scrapes:
 - target: `xaults-api.xaults.svc.cluster.local:80`
 - interval: `5s`
 
-Access Prometheus:
-
-```sh
-make port-forward-prometheus
-```
-
-Then open:
-
-```text
-http://127.0.0.1:9090
-```
-
-Access Grafana:
-
-```sh
-make port-forward-grafana
-```
-
-Then open:
-
-```text
-http://127.0.0.1:3000
-```
-
-The exported dashboard JSON is stored at [monitoring/xaults-api-observability-dashboard.json](/Users/daksh/GolandProjects/xaults-assignment/monitoring/xaults-api-observability-dashboard.json#L1).
+The exported dashboard JSON is stored at [monitoring/xaults-api-observability-dashboard.json](/Users/daksh/GolandProjects/xaults-assignment/monitoring/xaults-api-observability-dashboard.json).
 
 It includes:
 
@@ -237,3 +314,18 @@ Stop Minikube if needed:
 ```sh
 minikube stop
 ```
+
+### Tests
+
+Make sure you are in the `xaults-assignment` folder
+
+```sh
+go test ./tests/... -v
+```
+
+Even Added in the Gihub Workflow
+
+
+### Grafana DashBoard
+
+
