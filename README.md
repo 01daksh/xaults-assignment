@@ -204,7 +204,8 @@ curl --location 'http://localhost:1323/services' \
 --header 'Content-Type: application/json' \
 --data '{
   "name": "payment-services",
-  "description": "Handles payment"
+  "description": "Handles payment",
+  "health_status": "degraded"
 }'
 ```
 
